@@ -1,0 +1,100 @@
+\documentclass[10pt,conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.geometric}
+\usepackage[
+  backend=biber,
+  style=ieee,
+  sorting=none
+]{biblatex}
+\addbibresource{references.bib}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{caption}
+\usepackage{float}
+
+\sisetup{
+  output-decimal-marker = {,},
+  per-mode = symbol
+}
+
+\title{Análisis de Rendimiento Paralelo aplicado al Proyecto Fin de Curso:\\
+Del ordenamiento y \emph{Top-N} distribuido en PySpark a la propuesta de\\
+integración en el Sistema de Control de Laboratorios Informáticos (SCLI)}
+
+\author{
+\IEEEauthorblockN{Iván Andrés Villamarín Cuenca}
+\IEEEauthorblockA{Facultad de Ciencias de la Computación --- UTEQ}
+}
+
+\begin{document}
+\shorthandoff{<>}
+
+
+\begin{titlepage}
+\onecolumn
+\centering
+\vspace*{1cm}
+{\large UNIVERSIDAD TÉCNICA ESTATAL DE QUEVEDO}\\[2mm]
+{\normalsize Facultad de Ciencias de la Computación}\\
+{\normalsize Carrera de Ingeniería de Software}\\[10mm]
+
+{\Large\bfseries Código de actividad: TA-IND-04}\\[2mm]
+{\normalsize Trabajo Autónomo Individual --- Informe Técnico}\\[10mm]
+
+\rule{0.9\linewidth}{0.4pt}\\[4mm]
+{\LARGE\bfseries Análisis de Rendimiento Paralelo aplicado al Proyecto Fin de Curso}\\[3mm]
+{\large Del ordenamiento y \emph{Top-N} distribuido en PySpark a la propuesta de integración\\ en el Sistema de Control de Laboratorios Informáticos (SCLI)}\\[4mm]
+\rule{0.9\linewidth}{0.4pt}\\[12mm]
+
+\begin{tabular}{@{}rl@{}}
+\textbf{Asignatura:} & Aplicaciones Distribuidas (ISR-701) \\[1mm]
+\textbf{Unidad:} & Unidad 4 --- Cómputo Paralelo y Distribuido \\[1mm]
+\textbf{Práctica de origen:} & GA-SUM-05 / PE-U4 --- Procesamiento Distribuido con Apache Spark \\[1mm]
+\textbf{Estudiante:} & Iván Andrés Villamarín Cuenca \\[1mm]
+\textbf{Equipo de PE-U4:} & Equipo C --- Freddy Farinango, Jeremy Gaibor, Iván Villamarín \\[1mm]
+\textbf{PFC de referencia:} & SCLI --- Sistema de Control de Laboratorios Informáticos \\[1mm]
+\textbf{Transformación foco:} & T5 --- Ordenamiento y Top-20 \\[1mm]
+\textbf{Repositorio (este informe):} & \url{https://github.com/iavillamarin98-pred/ta-ind-04-villamarin} \\[1mm]
+\textbf{Repositorio de origen (PE-U4):} & \url{https://github.com/ffarinangog2/pe-u4-spark-equipo-c} \\[1mm]
+\textbf{Commit de los datos base:} & \texttt{3a0ae757b6f8288bf095905e286bca75d8026a36} \\[1mm]
+\textbf{Docente:} & Gleiston C. Guerrero-Ulloa, M.Sc. \\[1mm]
+\textbf{Período académico:} & 2026--2027 PPA \\[1mm]
+\textbf{Fecha:} & \today \\
+\end{tabular}
+
+\vfill
+\end{titlepage}
+\twocolumn
+
+
+\maketitle
+
+\begin{abstract}
+Este informe analiza de forma individual los resultados de \textit{speedup} obtenidos en la práctica grupal GA-SUM-05/PE-U4 --- \textit{Procesamiento Distribuido con Apache Spark} --- para la transformación T5 (ordenamiento global y selección de las 20 solicitudes de mayor demanda) sobre un conjunto sintético de 500\,000 solicitudes de reserva de laboratorios, ejecutada en pandas y en PySpark 3.5.0 sobre un clúster Spark Standalone real de hasta cuatro \textit{executors}. A diferencia de otras transformaciones del equipo, T5 cuenta con mediciones propias de escalado en $N=1,2,4$ \textit{executors}, lo que permite un análisis cuantitativo completo frente a la Ley de Amdahl y la métrica de Karp-Flatt. Se determina que, a diferencia de las transformaciones más ligeras del \textit{pipeline}, el umbral de rentabilidad de T5 ya se cruza al volumen actual, y se propone un punto concreto de integración de un servicio de generación de rankings en la arquitectura de microservicios del Sistema de Control de Laboratorios Informáticos (SCLI).
+\end{abstract}
+
+\section{Introducción y contexto}
+\label{sec:intro}
+
+El presente documento constituye la entrega individual TA-IND-04 de la asignatura Aplicaciones Distribuidas (ISR-701), Unidad 4 -- Cómputo Paralelo y Distribuido. Su objetivo es explotar intelectualmente, de forma individual, los datos experimentales producidos en equipo durante la práctica \textbf{GA-SUM-05/PE-U4 --- Procesamiento Distribuido con Apache Spark: comprobación experimental de la Ley de Amdahl}, en la cual se compararon cinco transformaciones (T1--T5) sobre un mismo conjunto de datos, ejecutadas alternativamente con pandas (motor secuencial de referencia) y con PySpark (motor distribuido) sobre un clúster Spark Standalone real.
+
+El experimento de origen se realizó sobre un conjunto sintético y reproducible de 500\,000 solicitudes de reserva de laboratorios y 40 laboratorios, relacionados 1:N mediante \texttt{laboratorio\_id}, generado con semilla fija \texttt{20260804} para el dominio FUVV -- Sistema de Control de Laboratorios Informáticos. Se utilizan datos sintéticos porque no existen 500\,000 registros operacionales públicos adecuados para el volumen exigido y porque así se evita el uso de información personal real de estudiantes o docentes.
+
+Los datos base de este informe proceden del repositorio del equipo:
+\begin{itemize}
+  \item \textbf{Repositorio PE-U4:} \url{https://github.com/ffarinangog2/pe-u4-spark-equipo-c}
+  \item \textbf{Commit exacto:} {\small\texttt{3a0ae757\-b6f8288b\-f0959059\-05e286bc\-a75d8026a36}} (rama \texttt{main})
+  \item \textbf{Archivo fuente:} \texttt{resultados/tiempos\_resumen.csv} y \texttt{resultados/tiempos\_crudos.csv}
+\end{itemize}
+
+La transformación declarada como foco individual de este análisis es \textbf{T5 -- ordenamiento global y selección \textit{Top-20}}: las solicitudes se ordenan de forma estable por número de participantes y duración descendentes, con fecha e identificador como criterios de desempate ascendentes, y se seleccionan las 20 de mayor demanda. Es, junto con T3, una de las transformaciones para las que el equipo generó mediciones escaladas propias en $N=1,2,4$ \textit{executors}, condición indispensable para el análisis cuantitativo de escalabilidad que exige este instrumento. El dominio del PFC de referencia es el Sistema de Control de Laboratorios Informáticos (SCLI), un sistema de microservicios (Spring Boot, CockroachDB, Docker Compose) actualmente en desarrollo para automatizar la gestión de usuarios, laboratorios, reservas y solicitudes de la institución.
+
+\section{Análisis propio de los resultados de \textit{speedup}}
+\label{sec:analisis}
